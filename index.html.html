@@ -1,0 +1,1635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mesh Networking: A Technical Deep Dive</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0e14;
+    --surface: #111720;
+    --surface2: #161e2a;
+    --border: #1e2d40;
+    --accent: #00d4ff;
+    --accent2: #ff6b35;
+    --accent3: #39ff14;
+    --text: #c9d8e8;
+    --text-dim: #5a7a99;
+    --text-bright: #e8f4ff;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.75;
+    overflow-x: hidden;
+  }
+
+  /* ── GRID BACKGROUND ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── SIDEBAR NAV ── */
+  #sidebar {
+    position: fixed;
+    left: 0; top: 0; bottom: 0;
+    width: 240px;
+    background: rgba(10,14,20,0.96);
+    border-right: 1px solid var(--border);
+    padding: 32px 0;
+    z-index: 100;
+    overflow-y: auto;
+    transition: transform 0.3s ease;
+  }
+
+  #sidebar .logo {
+    padding: 0 24px 24px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+
+  #sidebar .logo span {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  #sidebar .logo h2 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-bright);
+    line-height: 1.3;
+  }
+
+  #sidebar nav a {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 24px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+    transition: all 0.2s;
+  }
+
+  #sidebar nav a:hover,
+  #sidebar nav a.active {
+    color: var(--accent);
+    border-left-color: var(--accent);
+    background: rgba(0,212,255,0.05);
+  }
+
+  #sidebar nav a .num {
+    color: var(--accent);
+    opacity: 0.5;
+    min-width: 20px;
+  }
+
+  #sidebar nav a.active .num { opacity: 1; }
+
+  /* ── MAIN CONTENT ── */
+  #main {
+    margin-left: 240px;
+    min-height: 100vh;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* ── HERO ── */
+  #hero {
+    padding: 80px 64px 80px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(135deg, rgba(0,212,255,0.04) 0%, transparent 60%);
+    position: relative;
+    overflow: hidden;
+  }
+
+  #hero::after {
+    content: 'MESH';
+    position: absolute;
+    right: 60px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-family: var(--mono);
+    font-size: 140px;
+    font-weight: 600;
+    color: rgba(0,212,255,0.04);
+    letter-spacing: -0.05em;
+    pointer-events: none;
+    user-select: none;
+  }
+
+  .tag-line {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+
+  #hero h1 {
+    font-size: 48px;
+    font-weight: 700;
+    color: var(--text-bright);
+    line-height: 1.15;
+    max-width: 620px;
+    margin-bottom: 20px;
+  }
+
+  #hero h1 em {
+    font-style: normal;
+    color: var(--accent);
+  }
+
+  #hero .sub {
+    font-size: 17px;
+    color: var(--text-dim);
+    max-width: 560px;
+    margin-bottom: 36px;
+  }
+
+  .meta-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .pill .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent3);
+  }
+
+  /* ── PROGRESS BAR ── */
+  #progress-bar {
+    position: fixed;
+    top: 0; left: 240px; right: 0;
+    height: 2px;
+    background: var(--border);
+    z-index: 200;
+  }
+
+  #progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    width: 0%;
+    transition: width 0.1s;
+  }
+
+  /* ── MODULES ── */
+  .module {
+    padding: 64px 64px;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+  }
+
+  .module:hover {
+    background: rgba(255,255,255,0.005);
+  }
+
+  .module-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 24px;
+    margin-bottom: 40px;
+  }
+
+  .module-num {
+    font-family: var(--mono);
+    font-size: 48px;
+    font-weight: 600;
+    color: rgba(0,212,255,0.15);
+    line-height: 1;
+    min-width: 60px;
+    padding-top: 4px;
+  }
+
+  .module-title-block .label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--accent2);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .module-title-block h2 {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text-bright);
+    line-height: 1.2;
+  }
+
+  /* ── TYPOGRAPHY ── */
+  .module p {
+    margin-bottom: 18px;
+    color: var(--text);
+    max-width: 760px;
+  }
+
+  .module h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin: 36px 0 14px;
+    padding-left: 14px;
+    border-left: 3px solid var(--accent);
+  }
+
+  .module h4 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--accent);
+    font-family: var(--mono);
+    margin: 28px 0 10px;
+    letter-spacing: 0.05em;
+  }
+
+  strong { color: var(--text-bright); font-weight: 600; }
+
+  em { color: var(--accent); font-style: normal; }
+
+  /* ── CODE BLOCKS ── */
+  .code-block {
+    background: #070b10;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 20px 24px;
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--accent3);
+    overflow-x: auto;
+    margin: 20px 0;
+    line-height: 1.6;
+    max-width: 760px;
+  }
+
+  .code-block .comment { color: var(--text-dim); }
+  .code-block .kw { color: var(--accent); }
+  .code-block .val { color: var(--accent2); }
+
+  /* ── CALLOUT BOXES ── */
+  .callout {
+    border: 1px solid;
+    border-radius: 4px;
+    padding: 18px 22px;
+    margin: 24px 0;
+    max-width: 760px;
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  .callout.info {
+    border-color: rgba(0,212,255,0.3);
+    background: rgba(0,212,255,0.05);
+  }
+
+  .callout.warning {
+    border-color: rgba(255,107,53,0.3);
+    background: rgba(255,107,53,0.05);
+  }
+
+  .callout.tip {
+    border-color: rgba(57,255,20,0.3);
+    background: rgba(57,255,20,0.05);
+  }
+
+  .callout .callout-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+
+  .callout.info .callout-label { color: var(--accent); }
+  .callout.warning .callout-label { color: var(--accent2); }
+  .callout.tip .callout-label { color: var(--accent3); }
+
+  /* ── TABLES ── */
+  .table-wrap {
+    overflow-x: auto;
+    margin: 24px 0;
+    max-width: 760px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    font-family: var(--mono);
+  }
+
+  th {
+    background: var(--surface2);
+    color: var(--accent);
+    padding: 10px 16px;
+    text-align: left;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    border-bottom: 2px solid var(--border);
+  }
+
+  td {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: top;
+  }
+
+  tr:hover td { background: rgba(255,255,255,0.02); }
+
+  /* ── DIAGRAMS / ASCII ── */
+  .diagram {
+    background: #050810;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 28px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent);
+    line-height: 1.8;
+    overflow-x: auto;
+    margin: 24px 0;
+    max-width: 760px;
+  }
+
+  /* ── MATH ── */
+  .math {
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--accent2);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 16px 22px;
+    margin: 16px 0;
+    max-width: 760px;
+    border-radius: 4px;
+  }
+
+  .math .desc {
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-top: 6px;
+  }
+
+  /* ── KEY CONCEPT ── */
+  .key-concept {
+    display: flex;
+    gap: 16px;
+    padding: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    margin: 20px 0;
+    max-width: 760px;
+  }
+
+  .key-concept .icon {
+    font-size: 24px;
+    min-width: 32px;
+    line-height: 1.3;
+  }
+
+  .key-concept .body { font-size: 15px; }
+  .key-concept .body strong { display: block; margin-bottom: 4px; }
+
+  /* ── QUIZ SECTION ── */
+  #quiz {
+    padding: 64px 64px;
+    background: var(--surface);
+    border-top: 2px solid var(--accent);
+  }
+
+  #quiz h2 {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--text-bright);
+    margin-bottom: 8px;
+  }
+
+  #quiz .quiz-subtitle {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 40px;
+    letter-spacing: 0.05em;
+  }
+
+  .question {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 28px;
+    margin-bottom: 20px;
+    max-width: 760px;
+    transition: border-color 0.3s;
+  }
+
+  .question.correct { border-color: var(--accent3); }
+  .question.incorrect { border-color: var(--accent2); }
+
+  .question .q-num {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--accent);
+    letter-spacing: 0.15em;
+    margin-bottom: 10px;
+  }
+
+  .question .q-text {
+    font-size: 16px;
+    color: var(--text-bright);
+    font-weight: 500;
+    margin-bottom: 18px;
+    line-height: 1.5;
+  }
+
+  .options { display: flex; flex-direction: column; gap: 8px; }
+
+  .option {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 11px 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 14px;
+    color: var(--text);
+    text-align: left;
+    width: 100%;
+    font-family: var(--sans);
+  }
+
+  .option:hover { border-color: var(--accent); color: var(--text-bright); }
+  .option.selected { border-color: var(--accent); background: rgba(0,212,255,0.08); }
+  .option.correct { border-color: var(--accent3); background: rgba(57,255,20,0.08); color: var(--accent3); }
+  .option.wrong { border-color: var(--accent2); background: rgba(255,107,53,0.08); color: var(--accent2); }
+  .option.reveal { border-color: var(--accent3); background: rgba(57,255,20,0.04); }
+
+  .option .opt-key {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    min-width: 20px;
+    color: var(--text-dim);
+    padding-top: 1px;
+  }
+
+  .explanation {
+    margin-top: 14px;
+    padding: 12px 16px;
+    background: var(--surface2);
+    border-left: 3px solid var(--accent3);
+    border-radius: 0 4px 4px 0;
+    font-size: 14px;
+    color: var(--text);
+    display: none;
+  }
+
+  .explanation.show { display: block; }
+
+  #submit-quiz {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 32px;
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 16px;
+  }
+
+  #submit-quiz:hover { background: #33deff; transform: translateY(-1px); }
+  #submit-quiz:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+  #quiz-result {
+    margin-top: 32px;
+    padding: 28px;
+    background: var(--bg);
+    border: 2px solid var(--accent);
+    border-radius: 6px;
+    max-width: 760px;
+    display: none;
+  }
+
+  #quiz-result.show { display: block; }
+
+  #quiz-result .score {
+    font-family: var(--mono);
+    font-size: 52px;
+    font-weight: 600;
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 8px;
+  }
+
+  #quiz-result .score-label {
+    font-size: 14px;
+    color: var(--text-dim);
+    margin-bottom: 16px;
+  }
+
+  #quiz-result .verdict {
+    font-size: 17px;
+    color: var(--text-bright);
+    font-weight: 500;
+  }
+
+  /* ── SCROLL TO TOP ── */
+  #back-top {
+    position: fixed;
+    bottom: 32px;
+    right: 32px;
+    width: 40px; height: 40px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 16px;
+    color: var(--text-dim);
+    transition: all 0.2s;
+    opacity: 0;
+    z-index: 100;
+  }
+
+  #back-top.visible { opacity: 1; }
+  #back-top:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* ── MOBILE ── */
+  @media (max-width: 900px) {
+    #sidebar { transform: translateX(-100%); }
+    #sidebar.open { transform: translateX(0); }
+    #main { margin-left: 0; }
+    #progress-bar { left: 0; }
+    .module, #hero, #quiz { padding: 40px 24px; }
+    #hero h1 { font-size: 32px; }
+    #hero::after { display: none; }
+    #menu-toggle {
+      position: fixed; top: 16px; left: 16px;
+      z-index: 200;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      width: 40px; height: 40px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; color: var(--text); font-size: 18px;
+    }
+  }
+
+  @media (min-width: 901px) {
+    #menu-toggle { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div id="progress-bar"><div id="progress-fill"></div></div>
+
+<div id="menu-toggle" onclick="toggleSidebar()">☰</div>
+
+<aside id="sidebar">
+  <div class="logo">
+    <span>Deep Dive Course</span>
+    <h2>Mesh Networking</h2>
+  </div>
+  <nav id="nav-links">
+    <a href="#hero" class="active"><span class="num">00</span> Overview</a>
+    <a href="#mod1"><span class="num">01</span> History & Origins</a>
+    <a href="#mod2"><span class="num">02</span> Topology Mathematics</a>
+    <a href="#mod3"><span class="num">03</span> Routing Protocols</a>
+    <a href="#mod4"><span class="num">04</span> 802.11s Standard</a>
+    <a href="#mod5"><span class="num">05</span> Security</a>
+    <a href="#mod6"><span class="num">06</span> Real Deployments</a>
+    <a href="#mod7"><span class="num">07</span> Performance Trade-offs</a>
+    <a href="#mod8"><span class="num">08</span> Emerging Frontiers</a>
+    <a href="#quiz"><span class="num">⬡</span> Final Quiz</a>
+  </nav>
+</aside>
+
+<main id="main">
+
+<!-- HERO -->
+<section id="hero">
+  <p class="tag-line">Technical Course · 8 Modules</p>
+  <h1>Mesh Networking:<br><em>From Theory to Deployment</em></h1>
+  <p class="sub">A ground-up technical exploration of how self-healing, decentralized networks are built, routed, secured, and scaled — from military packet radios to your city's IoT backbone.</p>
+  <div class="meta-pills">
+    <span class="pill"><span class="dot"></span> 35–45 min read</span>
+    <span class="pill"><span class="dot" style="background:var(--accent2)"></span> 8 Technical Modules</span>
+    <span class="pill"><span class="dot" style="background:var(--accent)"></span> 10-Question Final Quiz</span>
+    <span class="pill"><span class="dot" style="background:#a78bfa"></span> Beginner → Intermediate</span>
+  </div>
+</section>
+
+<!-- MODULE 1: HISTORY -->
+<section class="module" id="mod1">
+  <div class="module-header">
+    <div class="module-num">01</div>
+    <div class="module-title-block">
+      <div class="label">Module One · ~5 min</div>
+      <h2>History & Origins of Mesh Networking</h2>
+    </div>
+  </div>
+
+  <p>Mesh networking didn't emerge from Silicon Valley venture capital. It was born in the crucible of Cold War-era military research — where the central question wasn't <em>"how do we make networks faster?"</em> but rather <em>"how do we make networks that survive a nuclear attack?"</em></p>
+
+  <h3>ARPANET and the Survivability Thesis</h3>
+  <p>In 1964, RAND Corporation researcher Paul Baran published a landmark paper titled <strong>"On Distributed Communications."</strong> Baran was obsessed with a specific problem: the US military's command-and-control communications were centralized. If Moscow knocked out key switching centers, the entire network would collapse. His proposed solution was radical for the time.</p>
+
+  <p>Baran described three fundamental network architectures:</p>
+
+  <div class="diagram">
+    CENTRALIZED          DECENTRALIZED         DISTRIBUTED (Mesh)
+    
+         ★                  ★   ★                ★ — ★ — ★
+        /|\                / \ / \              / \ / \ / \
+       ● ● ●             ●   ●   ●            ★   ★   ★   ★
+      /|\ /|\            |\ /|\ /|            |\ /|\ /|\ /|
+     ●●●●●●●●●          ●●● ●●● ●●●          ★★★★★★★★★★★★
+    
+    Single point of    Multiple hubs,        Every node routes.
+    failure — one      still fragile         No center to destroy.
+    hub dies, ALL      if hubs fail.         
+    connections drop.  
+  </div>
+
+  <p>The distributed model — what we now call a mesh — meant every node both consumed and forwarded data. Destroy 30% of the nodes and the network self-heals, routing packets around the damage.</p>
+
+  <h3>Packet Switching: The Enabling Technology</h3>
+  <p>For Baran's mesh to work, data couldn't flow as continuous circuits (like telephone calls). It needed to be broken into small, independently-routable chunks. This became <strong>packet switching</strong> — each "packet" carries its own destination address and can take a different path through the mesh to reach the same endpoint.</p>
+
+  <div class="callout info">
+    <div class="callout-label">Key Insight</div>
+    Packet switching is what makes mesh networking practical. If you had to dedicate a fixed path for every communication, losing a single link would break the session. With packets, each unit of data independently navigates around failures.
+  </div>
+
+  <h3>From ARPANET to Amateur Radio Mesh</h3>
+  <p>ARPANET (1969) implemented these ideas for wired networks. But the real evolution toward modern wireless mesh came through the <strong>amateur radio community</strong> in the 1970s–80s. "Packet radio" operators built mesh networks using AX.25 protocol, where radio operators would relay digital messages across hundreds of miles — no internet required.</p>
+
+  <p>This lineage matters: mesh networking has always been about <strong>resilience, autonomy, and operation in degraded conditions</strong>. These aren't features bolted on later — they're the founding design intent.</p>
+
+  <h3>The Wireless Mesh Explosion (2000s)</h3>
+  <p>Three converging forces drove wireless mesh from military/hobbyist curiosity into mainstream infrastructure:</p>
+
+  <div class="table-wrap">
+    <table>
+      <tr><th>Force</th><th>What Changed</th><th>Impact on Mesh</th></tr>
+      <tr><td>802.11 WiFi (1997)</td><td>Cheap, ubiquitous wireless radios</td><td>Nodes became affordable; mesh deployable without wired backhaul</td></tr>
+      <tr><td>802.11s Amendment (2011)</td><td>Standardized mesh layer built into WiFi spec</td><td>Interoperability; devices from different vendors could mesh</td></tr>
+      <tr><td>IoT + Smart Cities (2010s)</td><td>Millions of sensors needing connectivity</td><td>Mesh became the only viable architecture for dense device deployments</td></tr>
+    </table>
+  </div>
+
+  <p>By the late 2010s, mesh networks were powering disaster-response communications in Puerto Rico after Hurricane Maria, community internet in rural areas across Africa and Latin America, and the backbone of building automation systems in commercial real estate.</p>
+
+  <div class="callout tip">
+    <div class="callout-label">Historical Context</div>
+    The 2011 Arab Spring saw mesh-like ad hoc networking tools (FireChat, Briar) used by protesters to communicate when governments shut down centralized internet infrastructure. The survivability goal Paul Baran had in 1964 was now protecting citizens from their own governments.
+  </div>
+
+</section>
+
+<!-- MODULE 2: TOPOLOGY MATH -->
+<section class="module" id="mod2">
+  <div class="module-header">
+    <div class="module-num">02</div>
+    <div class="module-title-block">
+      <div class="label">Module Two · ~6 min</div>
+      <h2>Topology Mathematics</h2>
+    </div>
+  </div>
+
+  <p>Before any packet can be routed, a mesh network must understand its own shape. This is the domain of <strong>graph theory</strong> — the mathematical language of nodes and connections. Understanding the math is what separates engineers who build robust meshes from those who deploy fragile ones.</p>
+
+  <h3>The Graph Model</h3>
+  <p>A mesh network is formally modeled as a <strong>graph G = (V, E)</strong>, where V is the set of vertices (nodes/devices) and E is the set of edges (radio links). Each edge may have associated weights representing link quality, latency, or cost.</p>
+
+  <div class="math">
+    G = (V, E)
+    <br>V = {n₁, n₂, n₃, ..., nₖ}  — the set of all nodes
+    <br>E ⊆ V × V                     — pairs of nodes with active links
+    <br>w: E → ℝ⁺                     — weight function (link cost)
+    <div class="desc">For a weighted directed graph — useful when link quality differs in each direction (asymmetric RF paths are common in real deployments)</div>
+  </div>
+
+  <h3>Connectivity and Degree</h3>
+  <p>The <strong>degree</strong> of a node is simply how many neighbors it can directly communicate with. In mesh terms, this is the number of one-hop peers a node maintains active links to.</p>
+
+  <div class="math">
+    deg(v) = |{u ∈ V : (v,u) ∈ E}|
+    <div class="desc">For wireless mesh: degree is bounded by channel capacity and interference management. A node with degree 1 is a "leaf" — vulnerable to isolation. A node with degree ≥ 3 is considered well-connected.</div>
+  </div>
+
+  <h3>The Connectivity Problem: k-Connectivity</h3>
+  <p>A graph is <strong>k-connected</strong> if it remains connected after removing any k−1 nodes. This is the mathematical formalization of resilience. A 1-connected graph has at least one path between any two nodes. A 2-connected graph can lose any single node and still function.</p>
+
+  <div class="callout warning">
+    <div class="callout-label">Design Implication</div>
+    Most commercial mesh deployments target 2-connectivity minimum (no single node failure breaks the network). Military or critical infrastructure meshes target 3- or 4-connectivity. Each step up in k approximately doubles your infrastructure cost.
+  </div>
+
+  <h3>Diameter and Path Length</h3>
+  <p>The <strong>diameter</strong> of a mesh graph is the longest shortest-path between any two nodes. In network terms: what's the worst-case hop count a packet might traverse?</p>
+
+  <div class="math">
+    diam(G) = max_{u,v ∈ V} d(u,v)
+    <br>where d(u,v) = length of shortest path from u to v
+    <div class="desc">Low diameter = low latency. High diameter = high hop count = each hop adds latency and potential for loss. Dense urban meshes often have diameters of 3–5. Sparse rural meshes can reach 10–15+ hops.</div>
+  </div>
+
+  <h3>The Small-World Property</h3>
+  <p>Well-designed mesh networks exhibit the <strong>small-world property</strong>: despite having many nodes, the average path length between any two nodes is surprisingly short — growing as log(N) where N is the node count, not linearly.</p>
+
+  <div class="math">
+    L ∝ log(N) / log(k)
+    <div class="desc">Average path length L for a random graph with N nodes each having average degree k. This means: doubling your network size adds only one hop to average paths, if connectivity is maintained.</div>
+  </div>
+
+  <h3>Betweenness Centrality: Finding Bottlenecks</h3>
+  <p>Not all nodes in a mesh are equal. Some nodes carry a disproportionate share of routed traffic — they sit on many shortest paths. <strong>Betweenness centrality</strong> quantifies this:</p>
+
+  <div class="math">
+    BC(v) = Σ_{s≠v≠t} (σ_{st}(v) / σ_{st})
+    <div class="desc">σ_st = total shortest paths from s to t. σ_st(v) = those paths that pass through node v. A high-BC node is a critical relay — losing it degrades the whole network disproportionately.</div>
+  </div>
+
+  <div class="callout info">
+    <div class="callout-label">Practical Application</div>
+    Network planners compute betweenness centrality during site surveys. High-BC nodes get better hardware (more powerful radios, redundant power, physical security). This is exactly why backbone mesh nodes in city deployments are on rooftops with UPS systems, while leaf nodes can be on streetlights.
+  </div>
+
+  <h3>Spanning Trees and Broadcast</h3>
+  <p>When a mesh needs to broadcast data to all nodes (e.g., routing table updates), flooding the entire network is wasteful. Instead, the network computes a <strong>minimum spanning tree (MST)</strong> — the minimal set of edges that connects all nodes with no cycles.</p>
+
+  <div class="diagram">
+    Full mesh (6 nodes, 15 possible edges):          Spanning Tree (5 edges, no cycles):
+    
+    A ——— B ——— C                                    A ——— B ——— C
+    |\ /|\ /|                                              |
+    | X | X |                                              D
+    |/ \|/ \|                                             / \
+    D ——— E ——— F                                        E   F
+    
+    Broadcast needs to traverse all edges            Only 5 transmissions needed
+    — 15 transmissions, massive redundancy           to reach all 6 nodes
+  </div>
+
+  <p>Algorithms like Prim's or Kruskal's compute MSTs in O(E log V) time — feasible even for large meshes, and re-runnable when topology changes.</p>
+
+</section>
+
+<!-- MODULE 3: ROUTING PROTOCOLS -->
+<section class="module" id="mod3">
+  <div class="module-header">
+    <div class="module-num">03</div>
+    <div class="module-title-block">
+      <div class="label">Module Three · ~7 min</div>
+      <h2>Routing Protocols</h2>
+    </div>
+  </div>
+
+  <p>Routing is the intelligence of a mesh. Given a constantly changing topology — nodes joining, leaving, links degrading — how does every node maintain an accurate enough picture of the network to make good forwarding decisions? This is one of distributed systems' hardest problems, and mesh routing protocols each make different trade-offs in solving it.</p>
+
+  <h3>The Two Fundamental Approaches</h3>
+
+  <div class="key-concept">
+    <div class="icon">📡</div>
+    <div class="body">
+      <strong>Proactive (Table-Driven) Routing</strong>
+      Every node continuously maintains routing tables to all destinations. Routes are precomputed; packets are forwarded immediately with no discovery delay. Cost: overhead of constant topology updates even when no one is communicating.
+    </div>
+  </div>
+
+  <div class="key-concept">
+    <div class="icon">🔍</div>
+    <div class="body">
+      <strong>Reactive (On-Demand) Routing</strong>
+      Routes are only discovered when needed. A node wanting to send a packet floods a Route Request (RREQ) through the network; the destination replies with a Route Reply (RREP). Cost: latency on first packet; excellent for sparse, intermittent communication.
+    </div>
+  </div>
+
+  <h3>OLSR — Optimized Link State Routing</h3>
+  <p>OLSR is the dominant proactive protocol for wireless mesh, used in 802.11s implementations and many community networks. Its key innovation is the <strong>Multipoint Relay (MPR)</strong> mechanism — a way to flood topology information through the network without every node needing to retransmit every message.</p>
+
+  <h4>How MPR Works</h4>
+  <p>Each node selects a subset of its 1-hop neighbors as MPRs — specifically chosen so that those MPRs collectively cover all of the node's 2-hop neighbors. Only MPRs rebroadcast routing control messages, dramatically reducing overhead compared to pure flooding.</p>
+
+  <div class="diagram">
+    Node A's 1-hop neighborhood:        MPR Selection:
+    
+         B                                   B ← MPR (covers D,E)
+        /|\                                 /
+       A | E                            A       E ← MPR (covers F,G)
+        \|/                                 \
+         C                                   C (not MPR — D,E covered)
+        / \
+       D   F,G
+    
+    Without MPR: 6 nodes retransmit     With MPR: only B and E retransmit
+    routing updates = flooding          Same coverage, ~60% less overhead
+  </div>
+
+  <p>OLSR nodes periodically broadcast <strong>HELLO messages</strong> to discover neighbors, and <strong>TC (Topology Control) messages</strong> to advertise their MPR selector set. From these, every node builds a complete link-state map of the network and computes shortest paths using Dijkstra's algorithm.</p>
+
+  <div class="code-block">
+<span class="comment"># OLSR routing computation (simplified)</span>
+<span class="kw">function</span> compute_routes(topology_table):
+    routing_table = {}
+    
+    <span class="comment"># Dijkstra's from self</span>
+    unvisited = all_known_nodes
+    dist[self] = <span class="val">0</span>
+    
+    <span class="kw">while</span> unvisited not empty:
+        u = node with min dist in unvisited
+        <span class="kw">for each</span> neighbor v of u:
+            link_cost = topology_table[u][v]
+            alt = dist[u] + link_cost
+            <span class="kw">if</span> alt < dist[v]:
+                dist[v] = alt
+                prev[v] = u  <span class="comment"># next-hop tracking</span>
+        unvisited.remove(u)
+    
+    <span class="kw">return</span> routing_table  <span class="comment"># dest → next_hop mapping</span>
+  </div>
+
+  <h3>BATMAN — Better Approach to Mobile Networking</h3>
+  <p>BATMAN (used extensively in Freifunk and OpenWRT community meshes) takes a radically different approach: <strong>no node needs a full topology map.</strong> Instead of computing paths, BATMAN distributes "Originator Messages" (OGMs) — small broadcasts that propagate through the network. A node learns the best next-hop to any destination simply by observing which neighbor rebroadcasts that destination's OGMs most frequently and with best signal quality.</p>
+
+  <div class="callout info">
+    <div class="callout-label">BATMAN's Key Advantage</div>
+    Since no node maintains a full routing table, BATMAN scales to very large meshes with low per-node memory and CPU overhead. The trade-off: it's harder to debug, and convergence after topology changes is slower than OLSR.
+  </div>
+
+  <h3>AODV — Ad hoc On-Demand Distance Vector</h3>
+  <p>AODV is the canonical reactive protocol — widely studied and deployed in sensor networks. When a source node needs a route, it broadcasts a RREQ packet containing the destination address and a sequence number. Each intermediate node records the reverse path (for the RREP to follow back) and rebroadcasts the RREQ. The destination, or any node with a fresh route, sends back a RREP unicast along the reverse path.</p>
+
+  <div class="table-wrap">
+    <table>
+      <tr><th>Protocol</th><th>Type</th><th>Overhead</th><th>Latency</th><th>Best For</th></tr>
+      <tr><td>OLSR</td><td>Proactive</td><td>Medium-High</td><td>Low (routes prebuilt)</td><td>Dense, high-traffic mesh</td></tr>
+      <tr><td>BATMAN</td><td>Proactive</td><td>Low</td><td>Low</td><td>Large community mesh, IoT</td></tr>
+      <tr><td>AODV</td><td>Reactive</td><td>Low (idle)</td><td>High (first packet)</td><td>Sparse, intermittent comms</td></tr>
+      <tr><td>DSR</td><td>Reactive</td><td>Low (idle)</td><td>High (first packet)</td><td>Small, mobile ad hoc nets</td></tr>
+      <tr><td>HWMP</td><td>Hybrid</td><td>Medium</td><td>Medium</td><td>802.11s standard deployments</td></tr>
+    </table>
+  </div>
+
+  <h3>Link Quality Metrics</h3>
+  <p>Hop count alone is a terrible routing metric for wireless mesh. A 2-hop path over two excellent links beats a 1-hop path with a barely-usable signal. Modern protocols use composite metrics:</p>
+
+  <div class="math">
+    ETX (Expected Transmission Count) = 1 / (d_f × d_r)
+    <div class="desc">d_f = forward delivery ratio, d_r = reverse delivery ratio (measured from probe packets). ETX = 1.0 is a perfect link. ETX = 4.0 means 4 transmissions expected per successful packet — use this link only if no better path exists.</div>
+  </div>
+
+  <div class="math">
+    EWMA_ETX = α × ETX_new + (1-α) × ETX_old
+    <div class="desc">Exponentially-weighted moving average smooths out momentary fluctuations. α = 0.1 to 0.3 is typical — weighting recent measurements slightly more than historical, but avoiding overreaction to a single bad reading.</div>
+  </div>
+
+</section>
+
+<!-- MODULE 4: 802.11s -->
+<section class="module" id="mod4">
+  <div class="module-header">
+    <div class="module-num">04</div>
+    <div class="module-title-block">
+      <div class="label">Module Four · ~5 min</div>
+      <h2>The 802.11s Standard</h2>
+    </div>
+  </div>
+
+  <p>Before 802.11s was ratified in 2011, every mesh vendor invented its own proprietary protocol. A Cisco mesh node couldn't talk to a Motorola mesh node. Enterprise customers were locked into single-vendor ecosystems. 802.11s changed this — adding a standardized mesh layer <em>directly into the WiFi specification</em>.</p>
+
+  <h3>Architecture: Three Node Roles</h3>
+
+  <div class="diagram">
+    802.11s Network Architecture:
+
+    INTERNET
+       │
+    [Gate]  ←── Mesh Gate (MPP): bridges mesh to external network
+       │
+    [MP]——[MP]——[MP]      Mesh Points (MPs): participate in mesh routing
+     │ ╲          ╲       Each MP has a Mesh ID and runs HWMP
+    [MP] [MP]——[MAP]      
+              └───[STA]   Mesh Access Points (MAPs): also serve regular clients
+                  [STA]   (laptop, phone, etc.)
+
+    Key: MP = Mesh Point, MAP = Mesh AP, MPP = Mesh Portal Point
+  </div>
+
+  <h4>Mesh Point (MP)</h4>
+  <p>The fundamental building block. An MP participates in the mesh by establishing <strong>peer links</strong> with neighbors, running the routing protocol, and forwarding frames on behalf of other MPs. An MP does NOT serve client stations — it's purely infrastructure.</p>
+
+  <h4>Mesh Access Point (MAP)</h4>
+  <p>A MAP does everything an MP does, plus runs an 802.11 AP function on the same or a different radio. Client devices (phones, laptops) associate to MAPs via standard 802.11 associations — they have no idea they're connected to a mesh. From the client's perspective, it's just a WiFi network.</p>
+
+  <h4>Mesh Portal Point (MPP)</h4>
+  <p>The MPP is the gateway — a node that bridges the mesh to external networks (typically the wired internet). A deployment might have one or several MPPs for redundancy.</p>
+
+  <h3>Peering: How Nodes Find Each Other</h3>
+  <p>802.11s nodes broadcast <strong>Beacon frames</strong> containing a Mesh ID (analogous to SSID, but for mesh membership). When a node detects a neighbor with the same Mesh ID, it initiates <strong>Peer Link Management (PLM)</strong> using a three-way handshake:</p>
+
+  <div class="code-block">
+Node A                                    Node B
+   │                                         │
+   │──── Peer Link Open (capabilities) ────►│
+   │◄─── Peer Link Confirm (accept) ─────── │
+   │──── Peer Link Confirm (ack) ──────────►│
+   │                                         │
+   [Peer Link ESTABLISHED — frames can flow]
+   │                                         │
+   │◄──── Heartbeat / HELLO frames ─────────│
+   │      (every ~1 second)                  │
+   │                                         │
+   [If 3 consecutive HELLOs missed → link declared dead]
+  </div>
+
+  <h3>HWMP — Hybrid Wireless Mesh Protocol</h3>
+  <p>802.11s mandates HWMP as the default path selection protocol. HWMP is a hybrid: it combines elements of AODV (reactive, on-demand path discovery) with a <strong>proactive tree-building mode</strong> rooted at the MPP/gate.</p>
+
+  <p>In proactive mode, the MPP periodically broadcasts root announcements, and all MPs build a tree back to the root. This gives every node a default route to the internet "for free." On-demand path discovery kicks in for mesh-internal traffic between MPs that don't have routes in their tables.</p>
+
+  <h3>Frame Format: The Mesh Header</h3>
+  <p>802.11s adds a new <strong>Mesh Header</strong> to 802.11 frames. This is what makes multi-hop forwarding possible at the MAC layer — below IP, meaning non-IP traffic can also traverse the mesh.</p>
+
+  <div class="table-wrap">
+    <table>
+      <tr><th>Field</th><th>Size</th><th>Purpose</th></tr>
+      <tr><td>Mesh Flags</td><td>1 byte</td><td>AE flag (indicates address extension for bridging), plus reserved bits</td></tr>
+      <tr><td>TTL</td><td>1 byte</td><td>Time-to-live — decremented at each hop; frame discarded at 0 (prevents loops)</td></tr>
+      <tr><td>Mesh Sequence Number</td><td>4 bytes</td><td>Duplicate detection — per-source sequence number lets receivers discard retransmitted frames</td></tr>
+      <tr><td>Address Extension</td><td>0 or 12 bytes</td><td>Present when AE=1, carries original source and final destination MAC addresses for bridged frames</td></tr>
+    </table>
+  </div>
+
+  <h3>Channel Planning in 802.11s</h3>
+  <p>A critical (often underappreciated) design choice: all nodes in an 802.11s mesh must share the same channel for peer communication. This creates a <strong>hidden node problem at scale</strong> — nodes that can't hear each other can interfere at a common neighbor. Solutions include:</p>
+  <p><strong>Multi-radio architectures:</strong> dedicated 5 GHz backhaul radio for mesh links (less interference, higher bandwidth) + 2.4 GHz radio for client access. This is how consumer "mesh WiFi systems" (Eero, Google Nest WiFi) achieve acceptable performance.</p>
+  <p><strong>Multi-channel operation (MCO):</strong> advanced deployments assign different channels to different mesh links using coordinated channel assignment algorithms — dramatically improves aggregate throughput but requires careful planning and compatible hardware.</p>
+
+  <div class="callout warning">
+    <div class="callout-label">Common Misconception</div>
+    Single-radio 802.11s deployments suffer from severe throughput halving at each hop — the radio must receive on the same channel it transmits, so it can't do both simultaneously. A 3-hop path over a 300 Mbps link yields roughly 300/3 = 100 Mbps theoretical max, with real-world achieving far less. Multi-radio designs solve this; single-radio mesh is only appropriate for low-bandwidth IoT and sensor applications.
+  </div>
+
+</section>
+
+<!-- MODULE 5: SECURITY -->
+<section class="module" id="mod5">
+  <div class="module-header">
+    <div class="module-num">05</div>
+    <div class="module-title-block">
+      <div class="label">Module Five · ~5 min</div>
+      <h2>Security in Mesh Networks</h2>
+    </div>
+  </div>
+
+  <p>Mesh networks have a fundamentally different threat surface than traditional infrastructure networks. Every node is a router. A compromised node doesn't just lose data — it becomes a weapon capable of poisoning routing tables, eavesdropping on relayed traffic, or partitioning the network. Security in mesh is architecturally non-trivial.</p>
+
+  <h3>The Unique Threat Model</h3>
+
+  <div class="table-wrap">
+    <table>
+      <tr><th>Attack</th><th>Mechanism</th><th>Impact</th></tr>
+      <tr><td>Wormhole Attack</td><td>Two colluding nodes create a private high-speed tunnel, attracting traffic through them</td><td>Traffic concentration → eavesdropping, selective dropping</td></tr>
+      <tr><td>Sinkhole Attack</td><td>Malicious node advertises artificially superior routes to attract traffic</td><td>Traffic redirection → DoS or data theft</td></tr>
+      <tr><td>Sybil Attack</td><td>One physical attacker presents multiple fake node identities</td><td>Subverts routing redundancy; one attacker controls many "nodes"</td></tr>
+      <tr><td>Black Hole Attack</td><td>Node advertises routes but silently drops all forwarded packets</td><td>Silent DoS; hard to detect</td></tr>
+      <tr><td>Gray Hole Attack</td><td>Node drops packets selectively (e.g., only HTTP, not HELLO/routing)</td><td>Network appears functional but specific traffic is lost</td></tr>
+      <tr><td>Byzantine Attack</td><td>Compromised node behaves arbitrarily — may route correctly for a while before disrupting</td><td>Extremely hard to detect without cryptographic verification</td></tr>
+    </table>
+  </div>
+
+  <h3>SAE — Simultaneous Authentication of Equals</h3>
+  <p>802.11s mandates <strong>SAE (Simultaneous Authentication of Equals)</strong> as the peer link authentication protocol, drawn from 802.11's WPA3 specification. SAE is a password-authenticated key exchange (PAKE) based on the <strong>Dragonfly handshake</strong>.</p>
+
+  <p>Unlike WPA2-PSK where the password is directly used (and offline dictionary attacks are feasible after capturing a 4-way handshake), SAE provides <strong>forward secrecy</strong>: even if an attacker records the authentication exchange and later obtains the password, they cannot decrypt previously captured traffic.</p>
+
+  <div class="math">
+    SAE Commit Phase:
+    scalar = (rand + mask) mod r
+    element = -(mask × PWE)
+    
+    where PWE = Password Element (derived from shared password + MAC addresses)
+          r = order of the elliptic curve group
+    <div class="desc">Both sides commit to a value without revealing their random mask. The resulting Pairwise Master Key (PMK) is freshly derived per session — this is the "forward secrecy" guarantee.</div>
+  </div>
+
+  <h3>MIC: Message Integrity Codes</h3>
+  <p>After SAE establishes peer links, all 802.11s management frames (HELLOs, topology announcements, path requests) must be protected with <strong>MICs</strong> using the CCMP cipher (AES in counter mode + CBC-MAC). This prevents routing table poisoning — an attacker can't forge a HELLO claiming to be a different node without the per-link key.</p>
+
+  <h3>Cryptographic Routing Authentication</h3>
+  <p>For IP-layer routing protocols like OLSR, additional security extensions exist:</p>
+
+  <div class="code-block">
+<span class="comment"># OLSR Security Extension (RFC 7182) — simplified</span>
+Message includes:
+  - Standard OLSR fields (neighbors, MPR selectors)
+  - Validity Time
+  - <span class="kw">ICV_TLV</span>: Integrity Check Value
+    = HMAC-SHA256(message_body, shared_key)
+  - <span class="kw">TIMESTAMP_TLV</span>: prevents replay attacks
+    = current_time (±30 seconds tolerance)
+
+Receiving node:
+  1. Verify timestamp is within tolerance
+  2. Recompute HMAC with shared key
+  3. Compare with received ICV_TLV
+  4. Reject if mismatch (possible forgery/replay)
+  </div>
+
+  <h3>Detection: Watchdog Mechanisms</h3>
+  <p>For black-hole and gray-hole attacks, cryptographic authentication isn't sufficient — the attacker has legitimate keys but is misbehaving after authentication. The solution is <strong>cooperative watchdogs</strong>: each node monitors its neighbors' forwarding behavior.</p>
+
+  <p>When node A routes a packet via node B to destination C, node A continues listening (in promiscuous mode if possible, or via acknowledgment tracking). If B doesn't forward the packet within a timeout window, A increments B's "failure counter." After threshold failures, B is flagged as a potential black-hole and routes through B are abandoned.</p>
+
+  <div class="callout tip">
+    <div class="callout-label">Defense in Depth</div>
+    The security architecture of a robust mesh has multiple independent layers: (1) link-layer authentication via SAE, (2) routing message authentication via HMAC, (3) behavioral monitoring via watchdogs, (4) anomaly detection in network management systems. No single layer is sufficient alone — each catches different attack classes.
+  </div>
+
+  <h3>Physical Layer Security Considerations</h3>
+  <p>Unlike wired networks, radio signals are inherently broadcast — anyone with a compatible radio within range can receive transmissions. Two physical-layer mitigations are increasingly used in high-security deployments:</p>
+  <p><strong>Directional antennas:</strong> narrow-beam antennas reduce the physical area from which an attacker can intercept or inject signals. A 30° beamwidth antenna reduces the interception zone to ~8% of an omnidirectional antenna's coverage.</p>
+  <p><strong>Frequency hopping:</strong> spread-spectrum techniques where nodes rapidly switch channels according to a shared pseudorandom sequence. An attacker must either capture the full spectrum or know the hopping sequence — the former requires expensive hardware, the latter requires breaking the sequence's key.</p>
+
+</section>
+
+<!-- MODULE 6: REAL DEPLOYMENTS -->
+<section class="module" id="mod6">
+  <div class="module-header">
+    <div class="module-num">06</div>
+    <div class="module-title-block">
+      <div class="label">Module Six · ~6 min</div>
+      <h2>Real-World Deployments</h2>
+    </div>
+  </div>
+
+  <p>Theory meets reality harshly. Physical constraints — buildings, terrain, interference, weather, hardware failures — transform elegant graph models into engineering challenges. This module examines four major deployment contexts and what they teach about real mesh operation.</p>
+
+  <h3>Case Study 1: Community Mesh Networks (Freifunk / NYC Mesh)</h3>
+  <p><strong>Freifunk</strong> (Germany, ~600 cities) and <strong>NYC Mesh</strong> are volunteer-operated community ISPs built entirely on open-source mesh technology. They demonstrate mesh's potential for democratizing internet access.</p>
+
+  <div class="key-concept">
+    <div class="icon">🏙️</div>
+    <div class="body">
+      <strong>NYC Mesh Architecture</strong>
+      Supernodes (rooftop installations with fiber backhaul and high-gain sector antennas) connect to hundreds of residential nodes. Residential nodes form local meshes using 802.11s / BATMAN-adv on OpenWRT hardware. Node hardware costs: $80–$200. A single supernode covers a ~1km radius and serves 50–200 residential nodes.
+    </div>
+  </div>
+
+  <p>Key challenges encountered: <strong>building penetration losses</strong> (brick and concrete attenuate 2.4 GHz by 12–20 dB per wall, 5 GHz by 18–30 dB), <strong>Fresnel zone obstructions</strong> (tree growth between nodes that were clear when installed), and <strong>volunteer burnout</strong> on node maintenance — a sociotechnical problem as much as technical.</p>
+
+  <h3>The Fresnel Zone: A Required Concept</h3>
+  <p>Line-of-sight (LoS) is necessary but not sufficient for reliable wireless links. The <strong>Fresnel zone</strong> is an ellipsoidal region around the direct path that must also be clear of obstructions for full signal strength. If an obstacle (building, tree) penetrates the first Fresnel zone, signal strength can drop significantly even with LoS.</p>
+
+  <div class="math">
+    r₁ = 17.32 × √(d / (4 × f))     [in meters]
+    
+    where d = link distance (km), f = frequency (GHz)
+    
+    Example: 1km link at 5.8 GHz → r₁ = 17.32 × √(1/(4×5.8)) ≈ 3.2m
+    <div class="desc">The first Fresnel zone radius at the midpoint of a 1km, 5.8 GHz link is ~3.2m. Any obstacle within 3.2m of the direct path — including tree branches, rooftop equipment, or an adjacent building — degrades the link.</div>
+  </div>
+
+  <h3>Case Study 2: Disaster Response — Hurricane Maria (Puerto Rico, 2017)</h3>
+  <p>When centralized infrastructure (cell towers, fiber, power grid) failed across Puerto Rico after Hurricane Maria, mesh networks became critical. Several deployments illustrate the value of mesh resilience under real catastrophic conditions.</p>
+
+  <p><strong>Project Owl</strong> deployed battery-powered "Duck" nodes (ESP8266-based LoRa + WiFi mesh devices) that could be dropped from aircraft or handed to civilians. Nodes formed an ad hoc LoRaWAN + WiFi mesh, allowing text message communication over a 20km range with no infrastructure. Within 72 hours, 200 nodes covered a critical area of San Juan.</p>
+
+  <p>The key architectural lesson: <strong>disaster mesh must be self-sufficient at the node level</strong>. Each Duck node had 72 hours of battery, could relay for other nodes, and required zero configuration by end users. Compare this to enterprise mesh nodes requiring PoE switches, cloud management, and professional installation — useless in a disaster.</p>
+
+  <h3>Case Study 3: Industrial IoT — Smart Factory</h3>
+  <p>Modern manufacturing facilities deploy thousands of sensors monitoring equipment vibration, temperature, pressure, and throughput. Running Ethernet or traditional WiFi to each sensor is impractical. Mesh networking — specifically <strong>WirelessHART</strong> (IEC 62591) and <strong>ISA-100.11a</strong> — provides the solution.</p>
+
+  <div class="diagram">
+    Smart Factory Mesh Architecture:
+    
+    [Plant Control System]
+           │  (wired backbone)
+    [Gateway 1]       [Gateway 2]   ← multiple gateways for redundancy
+       │  ╲               │ ╲
+    [Mesh Node]—[Mesh Node] [MN]——[MN]
+       │            │          \   │
+    [Sensor]    [Sensor]     [Sensor][Sensor]
+    (pump)      (valve)      (motor) (tank)
+    
+    WirelessHART mesh: 2.4 GHz, TDMA + FDMA scheduling,
+    Time-Synchronized channels, AES-128 encryption per hop
+  </div>
+
+  <p>WirelessHART's critical innovation for industrial contexts: <strong>Time Division Multiple Access (TDMA)</strong> scheduling. Unlike contention-based WiFi (where nodes compete for air time, causing variable latency), WirelessHART assigns specific time slots to specific nodes for transmission. This guarantees deterministic, bounded latency — critical when a "vibration spike detected" alert must reach the control system within 100ms to prevent equipment damage.</p>
+
+  <h3>Case Study 4: Military Tactical Mesh</h3>
+  <p>The US military's <strong>MANET (Mobile Ad hoc NETwork)</strong> doctrine uses mesh for battlefield communications. Vehicles, soldiers, and drones form a dynamic mesh that moves with the force and survives node losses from enemy action.</p>
+
+  <p>Key challenges unique to this context: <strong>highly mobile nodes</strong> (vehicles moving at 60+ km/h), <strong>adversarial jamming</strong> (frequency-hopping spread spectrum and MIMO techniques for anti-jam), <strong>communications security</strong> (end-to-end NSA-approved encryption), and <strong>SWaP constraints</strong> (Size, Weight, and Power — every gram and watt matters in a soldier's kit).</p>
+
+  <p>The <strong>SINCGARS radio system</strong> and its successors use frequency hopping across 2,320 channels per second to defeat narrowband jamming. Modern systems like Harris's FALCON III run OLSR variants hardened against Byzantine failures and optimized for the highly dynamic topologies of mobile forces.</p>
+
+  <div class="callout info">
+    <div class="callout-label">Cross-Domain Lesson</div>
+    Every deployment context teaches a different constraint: community mesh → cost and maintenance; disaster mesh → self-sufficiency; industrial mesh → determinism; military mesh → mobility and adversarial operation. The best mesh engineers understand all four, because consumer and enterprise deployments increasingly encounter all four constraints simultaneously.
+  </div>
+
+</section>
+
+<!-- MODULE 7: PERFORMANCE TRADE-OFFS -->
+<section class="module" id="mod7">
+  <div class="module-header">
+    <div class="module-num">07</div>
+    <div class="module-title-block">
+      <div class="label">Module Seven · ~5 min</div>
+      <h2>Performance Trade-offs</h2>
+    </div>
+  </div>
+
+  <p>No mesh design is universally optimal. Every architectural choice involves a trade-off that may be correct for one deployment and disastrous for another. This module maps the key performance dimensions and their interdependencies.</p>
+
+  <h3>The Core Trade-off Triangle</h3>
+
+  <div class="diagram">
+              THROUGHPUT
+                  △
+                 /│\
+                / │ \
+               /  │  \
+              /   │   \
+    ←────────────────────────────
+    COVERAGE              LATENCY
+    
+    Improving any one vertex typically degrades the others.
+    
+    ↑ Coverage = more hops = ↑ latency + ↓ per-hop throughput
+    ↑ Throughput = higher frequency + more spatial reuse = ↓ coverage
+    ↓ Latency = shorter paths = ↓ coverage OR ↑ infrastructure cost
+  </div>
+
+  <h3>Throughput: The Multi-Hop Tax</h3>
+  <p>In a single-radio mesh, multi-hop communication suffers from what's called the <strong>"802.11 half-duplex penalty."</strong> A radio can transmit or receive but not both simultaneously on the same channel. In a chain A → B → C:</p>
+
+  <div class="math">
+    Throughput_n-hop ≈ Throughput_1-hop / n   (single radio, ideal conditions)
+    
+    Real-world factor: 0.45 × (1/n)  [accounts for protocol overhead, collisions]
+    
+    Example: 150 Mbps link capacity, 3-hop path:
+    Theoretical: 50 Mbps | Real-world: ~22 Mbps
+    <div class="desc">Multi-radio architectures (separate radios for backhaul vs. client access) break this dependency — backhaul radio transmits while client radio receives. 3-hop throughput approaches 60–70% of single-hop in well-designed multi-radio systems.</div>
+  </div>
+
+  <h3>Latency: Understanding Per-Hop Delays</h3>
+  <p>Mesh latency is the sum of multiple components at each hop:</p>
+
+  <div class="table-wrap">
+    <table>
+      <tr><th>Delay Component</th><th>Typical Value</th><th>Notes</th></tr>
+      <tr><td>Propagation delay</td><td>0.003–0.03 ms/km</td><td>Speed of light; negligible at mesh scales</td></tr>
+      <tr><td>Transmission delay</td><td>0.05–0.5 ms</td><td>Frame size / link rate; larger frames cost more</td></tr>
+      <tr><td>MAC contention (DCF)</td><td>1–10 ms</td><td>CSMA/CA backoff; highly variable under load</td></tr>
+      <tr><td>Queuing delay</td><td>0–50 ms</td><td>Congestion-dependent; biggest latency killer in practice</td></tr>
+      <tr><td>Routing lookup</td><td>0.01–0.1 ms</td><td>Usually negligible; table-driven routes are O(1)</td></tr>
+    </table>
+  </div>
+
+  <p>A 5-hop mesh path with moderate congestion can easily accumulate 50–150 ms RTT — problematic for voice calls (target: <50 ms RTT) and gaming, but acceptable for IoT telemetry and file transfers.</p>
+
+  <h3>Scalability: The N² Problem</h3>
+  <p>Proactive routing protocols (OLSR) exchange topology information whose overhead grows with network size. In the worst case (no MPR optimization), each node sends N control messages, and each needs to reach all N nodes: O(N²) control traffic. With MPR, this reduces significantly, but doesn't eliminate the scaling pressure.</p>
+
+  <div class="math">
+    OLSR control overhead ≈ N × TC_interval × TC_size × MPR_coverage
+    
+    For N=100 nodes, TC_interval=5s, TC_size=100 bytes, MPR_coverage=0.3:
+    ≈ 100 × (1/5) × 100 × 0.3 ≈ 600 bytes/sec per node
+    
+    At N=1000: ≈ 6,000 bytes/sec — still manageable
+    At N=10,000: ≈ 60,000 bytes/sec — begins to saturate low-bandwidth links
+    <div class="desc">Flat OLSR meshes typically cap at 100–300 nodes before routing overhead becomes problematic. Larger deployments use hierarchical approaches or segment into routing domains connected by gateway bridges.</div>
+  </div>
+
+  <h3>The Hidden Node Problem</h3>
+  <p>In a mesh, node A and node C might both be in range of relay node B but out of range of each other. Both A and C can hear B and assume the channel is free when the other isn't transmitting — leading to collisions at B that neither A nor C can detect.</p>
+
+  <div class="diagram">
+    A ─────── B ─────── C
+    
+    A can hear B, but NOT C.
+    C can hear B, but NOT A.
+    
+    A transmits → B receives
+    C simultaneously transmits → collision at B
+    Neither A nor C knows a collision occurred.
+    
+    CSMA/CA's DIFS/SIFS timings only help partially.
+    RTS/CTS (Request-to-Send/Clear-to-Send) is the proper fix:
+    
+    A → B: "RTS: I want to send to C via you"
+    B → all: "CTS: channel reserved for A-to-B transmission"
+    C hears CTS, defers its transmission.
+  </div>
+
+  <h3>QoS and Traffic Prioritization</h3>
+  <p>802.11e's <strong>EDCA (Enhanced Distributed Channel Access)</strong> extends into mesh via 802.11s, providing four access categories with different backoff parameters:</p>
+
+  <div class="table-wrap">
+    <table>
+      <tr><th>Access Category</th><th>Traffic Type</th><th>AIFS</th><th>CWmin</th></tr>
+      <tr><td>AC_VO (Voice)</td><td>VoIP, real-time audio</td><td>2</td><td>3 (shortest backoff)</td></tr>
+      <tr><td>AC_VI (Video)</td><td>Video streaming, surveillance</td><td>2</td><td>7</td></tr>
+      <tr><td>AC_BE (Best Effort)</td><td>Web, email, default</td><td>3</td><td>15</td></tr>
+      <tr><td>AC_BK (Background)</td><td>Bulk transfers, backups</td><td>7</td><td>15 (longest backoff)</td></tr>
+    </table>
+  </div>
+
+  <p>AIFS (Arbitration Inter-Frame Space) is the minimum gap before attempting transmission — smaller AIFS = higher priority. CWmin (Contention Window minimum) determines the maximum backoff — smaller window = statistically faster access. Voice traffic statistically gets channel access ~4× faster than background traffic.</p>
+
+</section>
+
+<!-- MODULE 8: EMERGING FRONTIERS -->
+<section class="module" id="mod8">
+  <div class="module-header">
+    <div class="module-num">08</div>
+    <div class="module-title-block">
+      <div class="label">Module Eight · ~4 min</div>
+      <h2>Emerging Frontiers</h2>
+    </div>
+  </div>
+
+  <p>Mesh networking isn't a solved domain — it's an active area of research and commercial development. Three frontiers are reshaping what mesh can do.</p>
+
+  <h3>Wi-Fi 7 (802.11be) and Multi-Link Operation</h3>
+  <p>Wi-Fi 7, finalized in 2024, introduces <strong>Multi-Link Operation (MLO)</strong> — a node can simultaneously maintain active associations and transmit on multiple bands (2.4 GHz, 5 GHz, 6 GHz) at once. For mesh, this is transformative: a mesh backhaul link can stripe data across three bands simultaneously, aggregating bandwidth and providing per-band redundancy.</p>
+
+  <div class="math">
+    MLO Aggregate Throughput ≈ Σ Throughput_band_i   (ideal case)
+    
+    2.4 GHz (40MHz): ~150 Mbps
+    5 GHz (160MHz): ~2,400 Mbps  
+    6 GHz (320MHz): ~5,760 Mbps (Wi-Fi 7 max channel width)
+    ─────────────────────────────────
+    Combined: ~8,310 Mbps theoretical peak per link
+    <div class="desc">Real-world achieves 20–40% of theoretical. But even 1.5–2 Gbps per mesh hop is a qualitative change — multi-hop mesh can finally deliver backhaul performance competitive with gigabit Ethernet.</div>
+  </div>
+
+  <h3>UAV Mesh Networks</h3>
+  <p>Unmanned Aerial Vehicles (drones) as mesh nodes introduce three-dimensional topology — a fundamentally different geometry from ground-based or building-mounted deployments. 3D mesh opens new possibilities for disaster response (UAVs providing coverage over debris fields) and precision agriculture (drone swarms monitoring fields).</p>
+
+  <p>Key research challenges: <strong>high mobility</strong> (10–30 m/s node speeds require sub-second routing convergence), <strong>energy constraints</strong> (hovering consumes significant power, leaving little budget for radio), and <strong>3D interference modeling</strong> (ground reflections and altitude-dependent propagation paths invalidate 2D RF planning tools).</p>
+
+  <h3>LoRa and Long-Range Mesh</h3>
+  <p><strong>LoRa (Long Range)</strong> operates in sub-GHz ISM bands (868 MHz EU, 915 MHz US) using chirp spread spectrum modulation. A single LoRa node can achieve 5–15 km range at 0–14 dBm transmit power — orders of magnitude better range-per-watt than WiFi.</p>
+
+  <div class="table-wrap">
+    <table>
+      <tr><th></th><th>802.11n (WiFi)</th><th>LoRa (SF12)</th></tr>
+      <tr><td>Frequency</td><td>2.4 / 5 GHz</td><td>868 / 915 MHz</td></tr>
+      <tr><td>Range (typical)</td><td>50–300m</td><td>2–15 km</td></tr>
+      <tr><td>Data Rate</td><td>150–600 Mbps</td><td>0.25–5.5 kbps</td></tr>
+      <tr><td>Power (active)</td><td>500–1500 mW</td><td>10–40 mW</td></tr>
+      <tr><td>Best use case</td><td>High bandwidth, indoor</td><td>Low-power, long-range IoT sensors</td></tr>
+    </table>
+  </div>
+
+  <p>Projects like <strong>Meshtastic</strong> implement LoRa mesh over a custom AODV-like protocol, enabling off-grid text messaging and GPS position sharing across 100+ km² coverage areas with nodes consuming less than 100mAh per day — months of battery life on a small pack.</p>
+
+  <h3>AI-Driven Mesh Management</h3>
+  <p>Traditional mesh management is reactive: routing protocols respond to topology changes after they've occurred. ML-driven approaches are beginning to make mesh <em>predictive</em>:</p>
+  <p><strong>Proactive link failure prediction</strong>: LSTM models trained on RF telemetry (RSSI trends, packet error rate over time, channel utilization) can predict link failures 30–60 seconds before they occur, allowing routing to pre-emptively reroute traffic. Early results show 40–60% reduction in packet loss during topology transitions.</p>
+  <p><strong>Traffic-aware channel assignment</strong>: Reinforcement learning agents optimize channel assignments across the mesh in response to observed interference patterns — a problem too combinatorially complex for traditional optimization approaches in large meshes.</p>
+
+  <div class="callout tip">
+    <div class="callout-label">Where This is Heading</div>
+    The convergence of Wi-Fi 7's multi-band capabilities, sub-GHz LoRa for long-range coverage, and ML-driven management is pointing toward heterogeneous mesh architectures that dynamically select radio technology per-link based on traffic type, range, and power budget. A sensor packet might hop LoRa for 8 km, then hand off to 5 GHz mesh for the last 200m to a gateway. The mesh becomes a smart, multi-modal fabric.
+  </div>
+
+</section>
+
+<!-- FINAL QUIZ -->
+<section id="quiz">
+  <h2>Final Assessment</h2>
+  <p class="quiz-subtitle">// 10 questions · select the best answer · explanations revealed on submission</p>
+
+  <div id="questions-container"></div>
+
+  <button id="submit-quiz" onclick="submitQuiz()">Submit Assessment</button>
+
+  <div id="quiz-result">
+    <div class="score" id="score-display">0/10</div>
+    <div class="score-label">questions answered correctly</div>
+    <div class="verdict" id="verdict-display"></div>
+  </div>
+</section>
+
+</main>
+
+<div id="back-top" onclick="window.scrollTo({top:0,behavior:'smooth'})">↑</div>
+
+<script>
+// ── QUIZ DATA ──
+const questions = [
+  {
+    q: "Paul Baran's 1964 RAND paper identified three network architectures. Which property of a distributed mesh topology was considered its key strategic advantage over centralized designs?",
+    options: [
+      "Lower latency due to fewer routing hops",
+      "Survivability — no single point of failure could destroy the network",
+      "Higher bandwidth through parallel transmission paths",
+      "Simpler management with no central coordination needed"
+    ],
+    answer: 1,
+    explanation: "Baran's primary concern was nuclear survivability. A distributed mesh has no hub to destroy — traffic routes around damaged nodes. Latency is actually worse in multi-hop mesh compared to direct connections."
+  },
+  {
+    q: "In graph theory, what does it mean for a mesh network to be '3-connected' (k=3)?",
+    options: [
+      "Each node has exactly 3 neighbors",
+      "The maximum path length between any two nodes is 3 hops",
+      "The network remains connected even after losing any 2 nodes simultaneously",
+      "At least 3 independent paths exist between the source and every destination"
+    ],
+    answer: 2,
+    explanation: "A k-connected graph remains connected after removing any k−1 nodes. So 3-connectivity means the network survives any 2 simultaneous node failures. Note: this is about arbitrary node removal, not specific nodes."
+  },
+  {
+    q: "OLSR uses Multipoint Relays (MPRs) to reduce routing overhead. What specific coverage requirement must a node's MPR set satisfy?",
+    options: [
+      "MPRs must collectively cover all nodes in the entire network",
+      "MPRs must cover all of the selecting node's 2-hop neighbors",
+      "MPRs must be connected to at least one MPP gateway",
+      "MPRs must have ETX values below 1.5 on all their links"
+    ],
+    answer: 1,
+    explanation: "A node selects the minimum set of 1-hop neighbors (MPRs) that together cover all of its 2-hop neighbors. This ensures topology information propagates 2 hops out from every source while minimizing retransmissions."
+  },
+  {
+    q: "In 802.11s, what is the role of a Mesh Portal Point (MPP)?",
+    options: [
+      "It serves WiFi client devices like phones and laptops",
+      "It selects MPRs for the OLSR routing protocol",
+      "It bridges the mesh network to an external network (like the wired internet)",
+      "It manages security key distribution for peer link authentication"
+    ],
+    answer: 2,
+    explanation: "An MPP is the gateway between the 802.11s mesh and external networks. A MAP (Mesh Access Point) serves client devices. MPRs are an OLSR concept, not an 802.11s role. Key distribution is handled by SAE during peering."
+  },
+  {
+    q: "A link has a forward delivery ratio (df) of 0.8 and a reverse delivery ratio (dr) of 0.5. What is its ETX value, and what does this indicate?",
+    options: [
+      "ETX = 0.4; an excellent link requiring less than 1 transmission per packet",
+      "ETX = 2.5; approximately 2–3 transmissions expected per successfully delivered packet",
+      "ETX = 1.3; a slightly degraded but usable link",
+      "ETX = 0.65; below the threshold to be included in routing tables"
+    ],
+    answer: 1,
+    explanation: "ETX = 1/(df × dr) = 1/(0.8 × 0.5) = 1/0.4 = 2.5. This means on average 2.5 transmission attempts are needed per successfully acknowledged packet. A perfect link has ETX=1.0. ETX=2.5 is usable but not ideal."
+  },
+  {
+    q: "What fundamental security advantage does SAE (Simultaneous Authentication of Equals) provide over WPA2-PSK, as mandated in 802.11s?",
+    options: [
+      "SAE uses longer passwords, making dictionary attacks computationally infeasible",
+      "SAE provides forward secrecy — past sessions cannot be decrypted even if the password is later compromised",
+      "SAE encrypts the password hash, preventing capture of authentication packets",
+      "SAE requires a RADIUS server, preventing local brute-force attacks"
+    ],
+    answer: 1,
+    explanation: "Forward secrecy is SAE's key property. Each session derives a fresh PMK via the Dragonfly handshake. Even if an attacker records authentication exchanges and later obtains the password, they cannot reconstruct the session key used to protect past traffic."
+  },
+  {
+    q: "In a single-radio 802.11s mesh, a node relaying traffic between two neighbors suffers a significant throughput penalty. What is the fundamental cause?",
+    options: [
+      "The routing table lookup adds 5–10ms of processing delay per packet",
+      "The single radio cannot transmit and receive simultaneously on the same channel — it must alternate",
+      "HWMP path discovery floods reduce available bandwidth for data traffic",
+      "The Mesh Header adds 8–14 bytes of overhead per frame, reducing effective data rate"
+    ],
+    answer: 1,
+    explanation: "This is the half-duplex penalty. A single radio can either receive from neighbor A or transmit to neighbor B — not both simultaneously. So it time-divides the channel, giving each direction roughly half the capacity. Multi-radio architectures use separate radios for each direction, solving this."
+  },
+  {
+    q: "In a sinkhole attack against a mesh routing protocol, what does the attacker actually do, and why is it effective?",
+    options: [
+      "The attacker jams the channel, preventing legitimate nodes from transmitting",
+      "The attacker advertises artificially superior routes to attract and intercept traffic",
+      "The attacker floods the network with fake HELLO messages to exhaust CPU resources",
+      "The attacker uses two colluding nodes to create a high-speed private tunnel"
+    ],
+    answer: 1,
+    explanation: "A sinkhole attack involves advertising impossibly good route metrics (e.g., ETX=1.0 to every destination, direct path to internet). Neighboring nodes, following normal routing logic, choose these 'better' routes and funnel traffic through the attacker, enabling eavesdropping or selective dropping."
+  },
+  {
+    q: "WirelessHART (used in industrial IoT mesh) uses TDMA scheduling rather than CSMA/CA used in standard WiFi mesh. What is the primary operational reason for this choice in industrial environments?",
+    options: [
+      "TDMA provides higher aggregate throughput across the mesh",
+      "TDMA eliminates the hidden node problem entirely",
+      "TDMA provides deterministic, bounded latency — critical for time-sensitive control system alerts",
+      "TDMA is more energy-efficient for battery-powered industrial sensors"
+    ],
+    answer: 2,
+    explanation: "CSMA/CA's contention-based access introduces variable latency (1–50ms per hop) that is unpredictable under load. TDMA assigns specific time slots to specific transmissions, guaranteeing that a sensor's critical alert will be transmitted within a known maximum time — essential for process control where a 100ms response window may prevent equipment damage."
+  },
+  {
+    q: "The ETX link metric is smoothed using an Exponentially Weighted Moving Average (EWMA). Why is this smoothing step important, rather than using the most recent raw ETX measurement?",
+    options: [
+      "Raw ETX values are in floating point; EWMA converts them to integers for routing tables",
+      "EWMA prevents route flapping caused by momentary interference or measurement noise",
+      "EWMA accounts for asymmetric link quality by weighting forward and reverse measurements differently",
+      "Without EWMA, ETX calculations would require O(N²) computation at each routing update"
+    ],
+    answer: 1,
+    explanation: "Wireless channels are noisy — a burst of interference might cause 10 consecutive packet losses, making instantaneous ETX look terrible, before the channel recovers. Without EWMA smoothing, routing protocols would react to this momentary event by abandoning a generally good link, then route flap back when it recovers. EWMA provides stability by blending recent and historical measurements."
+  }
+];
+
+// ── RENDER QUIZ ──
+function renderQuiz() {
+  const container = document.getElementById('questions-container');
+  questions.forEach((q, i) => {
+    const div = document.createElement('div');
+    div.className = 'question';
+    div.id = `q${i}`;
+    div.innerHTML = `
+      <div class="q-num">QUESTION ${String(i+1).padStart(2,'0')} / 10</div>
+      <div class="q-text">${q.q}</div>
+      <div class="options">
+        ${q.options.map((opt, j) => `
+          <button class="option" onclick="selectOption(${i}, ${j})" id="opt-${i}-${j}">
+            <span class="opt-key">${String.fromCharCode(65+j)}</span>
+            ${opt}
+          </button>
+        `).join('')}
+      </div>
+      <div class="explanation" id="exp-${i}"></div>
+    `;
+    container.appendChild(div);
+  });
+}
+
+const selected = {};
+
+function selectOption(qIdx, optIdx) {
+  if (selected[qIdx] !== undefined && document.getElementById(`q${qIdx}`).classList.contains('correct')) return;
+  if (selected[qIdx] !== undefined && document.getElementById(`q${qIdx}`).classList.contains('incorrect')) return;
+
+  // Clear previous selection in this question
+  questions[qIdx].options.forEach((_, j) => {
+    document.getElementById(`opt-${qIdx}-${j}`).classList.remove('selected');
+  });
+  selected[qIdx] = optIdx;
+  document.getElementById(`opt-${qIdx}-${optIdx}`).classList.add('selected');
+}
+
+function submitQuiz() {
+  const answered = Object.keys(selected).length;
+  if (answered < questions.length) {
+    const unanswered = questions.length - answered;
+    if (!confirm(`You have ${unanswered} unanswered question(s). Submit anyway?`)) return;
+  }
+
+  let score = 0;
+
+  questions.forEach((q, i) => {
+    const qDiv = document.getElementById(`q${i}`);
+    const expDiv = document.getElementById(`exp-${i}`);
+    const userAnswer = selected[i];
+
+    // Reveal correct answer
+    document.getElementById(`opt-${i}-${q.answer}`).classList.add('correct');
+
+    if (userAnswer === undefined) {
+      // Unanswered
+      qDiv.classList.add('incorrect');
+    } else if (userAnswer === q.answer) {
+      score++;
+      document.getElementById(`opt-${i}-${userAnswer}`).classList.remove('selected');
+      document.getElementById(`opt-${i}-${userAnswer}`).classList.add('correct');
+      qDiv.classList.add('correct');
+    } else {
+      document.getElementById(`opt-${i}-${userAnswer}`).classList.remove('selected');
+      document.getElementById(`opt-${i}-${userAnswer}`).classList.add('wrong');
+      qDiv.classList.add('incorrect');
+    }
+
+    // Show explanation
+    expDiv.textContent = q.explanation;
+    expDiv.classList.add('show');
+  });
+
+  // Show result
+  const resultDiv = document.getElementById('quiz-result');
+  const scoreDisplay = document.getElementById('score-display');
+  const verdictDisplay = document.getElementById('verdict-display');
+
+  scoreDisplay.textContent = `${score}/10`;
+
+  const verdicts = [
+    [0, 3, "Keep studying — revisit Modules 3, 5, and 7 first."],
+    [4, 5, "Solid foundation. Re-read the sections covering your missed questions."],
+    [6, 7, "Good understanding of mesh fundamentals. You're ready for hands-on lab work."],
+    [8, 9, "Strong grasp of theory and practice. You could deploy and manage real mesh infrastructure."],
+    [10, 10, "Perfect score. You understand mesh networking at a deployable engineering level."]
+  ];
+
+  const verdict = verdicts.find(([min, max]) => score >= min && score <= max);
+  verdictDisplay.textContent = verdict[2];
+
+  resultDiv.classList.add('show');
+  resultDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  document.getElementById('submit-quiz').disabled = true;
+}
+
+// ── PROGRESS BAR ──
+window.addEventListener('scroll', () => {
+  const scrollTop = window.scrollY;
+  const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+  const progress = docHeight > 0 ? (scrollTop / docHeight) * 100 : 0;
+  document.getElementById('progress-fill').style.width = progress + '%';
+
+  const backTop = document.getElementById('back-top');
+  backTop.classList.toggle('visible', scrollTop > 400);
+});
+
+// ── SIDEBAR ACTIVE STATE ──
+const sections = document.querySelectorAll('section[id]');
+const navLinks = document.querySelectorAll('#nav-links a');
+
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      const id = entry.target.id;
+      navLinks.forEach(link => {
+        link.classList.toggle('active', link.getAttribute('href') === `#${id}`);
+      });
+    }
+  });
+}, { threshold: 0.2, rootMargin: '-10% 0px -60% 0px' });
+
+sections.forEach(s => observer.observe(s));
+
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('open');
+}
+
+renderQuiz();
+</script>
+</body>
+</html>
